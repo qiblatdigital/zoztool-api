@@ -2,7 +2,6 @@ package repository
 
 import (
 	"errors"
-	"time"
 
 	"github.com/qiblatdigital/zoztool-api/internal/model"
 	"gorm.io/gorm"
@@ -22,13 +21,13 @@ func (r *PostTargetRepository) CreateBatch(targets []model.PostTarget) error {
 
 func (r *PostTargetRepository) FindByPostID(postID string) ([]model.PostTarget, error) {
 	var targets []model.PostTarget
-	err := r.db.Where("post_id = ? AND deleted_at IS NULL", postID).Find(&targets).Error
+	err := r.db.Where("post_id = ?", postID).Limit(100).Find(&targets).Error
 	return targets, err
 }
 
 func (r *PostTargetRepository) FindByID(id string) (*model.PostTarget, error) {
 	var target model.PostTarget
-	err := r.db.Where("id = ? AND deleted_at IS NULL", id).First(&target).Error
+	err := r.db.Where("id = ?", id).First(&target).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
@@ -40,11 +39,17 @@ func (r *PostTargetRepository) FindByID(id string) (*model.PostTarget, error) {
 
 func (r *PostTargetRepository) UpdateStatus(id string, status model.PostTargetStatus, errMsg *string) error {
 	updates := map[string]interface{}{
-		"status":     status,
-		"updated_at": time.Now(),
+		"status": status,
 	}
 	if errMsg != nil {
 		updates["error_message"] = *errMsg
 	}
-	return r.db.Model(&model.PostTarget{}).Where("id = ?", id).Updates(updates).Error
+	result := r.db.Model(&model.PostTarget{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

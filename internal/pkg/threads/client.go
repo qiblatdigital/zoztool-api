@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,7 +39,7 @@ func (c *Client) Publish(threadsUserID, accessToken, text string) error {
 }
 
 func (c *Client) createContainer(threadsUserID, accessToken, text string) (string, error) {
-	endpoint := fmt.Sprintf("%s/%s/threads", baseURL, threadsUserID)
+	endpoint := fmt.Sprintf("%s/%s/threads", baseURL, url.PathEscape(threadsUserID))
 
 	params := url.Values{}
 	params.Set("text", text)
@@ -52,9 +53,13 @@ func (c *Client) createContainer(threadsUserID, accessToken, text string) (strin
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response body: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("threads API error %d: %s", resp.StatusCode, string(body))
+		slog.Error("threads create container error", "status", resp.StatusCode, "body", string(body))
+		return "", fmt.Errorf("threads API error: status %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -70,7 +75,7 @@ func (c *Client) createContainer(threadsUserID, accessToken, text string) (strin
 }
 
 func (c *Client) publishContainer(threadsUserID, accessToken, containerID string) error {
-	endpoint := fmt.Sprintf("%s/%s/threads_publish", baseURL, threadsUserID)
+	endpoint := fmt.Sprintf("%s/%s/threads_publish", baseURL, url.PathEscape(threadsUserID))
 
 	params := url.Values{}
 	params.Set("creation_id", containerID)
@@ -83,9 +88,13 @@ func (c *Client) publishContainer(threadsUserID, accessToken, containerID string
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read publish response body: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("threads publish error %d: %s", resp.StatusCode, string(body))
+		slog.Error("threads publish error", "status", resp.StatusCode, "body", string(body))
+		return fmt.Errorf("threads publish error: status %d", resp.StatusCode)
 	}
 
 	var result struct {
