@@ -12,6 +12,7 @@ type SocialAccount struct {
 	RefreshToken   string     `json:"-" gorm:"type:text"`
 	TokenExpiresAt *time.Time `json:"token_expires_at" gorm:"type:timestamp"`
 	Username       string     `json:"username" gorm:"type:varchar(255)"`
+	ThreadsUserID  string     `json:"threads_user_id,omitempty" gorm:"type:varchar(255)"`
 }
 
 func (s *SocialAccount) TableName() string {

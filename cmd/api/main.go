@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
@@ -11,53 +12,44 @@ import (
 	"github.com/qiblatdigital/zoztool-api/internal/config"
 	"github.com/qiblatdigital/zoztool-api/internal/handler"
 	"github.com/qiblatdigital/zoztool-api/internal/middleware"
-	"github.com/qiblatdigital/zoztool-api/internal/model"
+	"github.com/qiblatdigital/zoztool-api/internal/pkg/threads"
 	"github.com/qiblatdigital/zoztool-api/internal/repository"
+	"github.com/qiblatdigital/zoztool-api/internal/scheduler"
 	"github.com/qiblatdigital/zoztool-api/internal/service"
 )
 
 func main() {
-	// Load .env
 	_ = godotenv.Load()
 
-	// Load config
 	cfg := config.LoadConfig()
 	cfg.Validate()
 
-	// Connect DB
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL()), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("failed to connect database: %v", err)
 	}
 
-	// Auto-migrate models
-	if err := db.AutoMigrate(
-		&model.User{},
-		&model.SocialAccount{},
-		&model.Post{},
-		&model.PostTarget{},
-		&model.MediaAsset{},
-	); err != nil {
-		log.Fatalf("failed to migrate: %v", err)
-	}
-
-	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
-	_ = repository.NewSocialAccountRepository(db)
-	_ = repository.NewPostRepository(db)
+	socialAccountRepo := repository.NewSocialAccountRepository(db)
+	postRepo := repository.NewPostRepository(db)
+	postTargetRepo := repository.NewPostTargetRepository(db)
 
-	// Initialize services
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.JWTRefreshSecret)
+	socialAccountService := service.NewSocialAccountService(socialAccountRepo)
+	threadsClient := threads.NewClient()
+	postService := service.NewPostService(postRepo, postTargetRepo, socialAccountRepo, threadsClient)
 
-	// Initialize handlers
 	healthHandler := handler.NewHealthHandler()
 	authHandler := handler.NewAuthHandler(authService)
+	socialAccountHandler := handler.NewSocialAccountHandler(socialAccountService)
+	postHandler := handler.NewPostHandler(postService)
 
-	// Setup router
+	sched := scheduler.NewScheduler(postService)
+	sched.Start()
+
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	// Routes
 	api := router.Group("/api/v1")
 	{
 		api.GET("/health", healthHandler.Health)
@@ -70,15 +62,29 @@ func main() {
 			auth.POST("/refresh", authHandler.Refresh)
 		}
 
-		// Protected routes example (can add more later)
 		protected := api.Group("")
 		protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 		{
-			// Add protected endpoints here
+			sa := protected.Group("/social-accounts")
+			{
+				sa.POST("", socialAccountHandler.Create)
+				sa.GET("", socialAccountHandler.List)
+				sa.GET("/:id", socialAccountHandler.GetByID)
+				sa.DELETE("/:id", socialAccountHandler.Delete)
+			}
+
+			posts := protected.Group("/posts")
+			{
+				posts.POST("", postHandler.Create)
+				posts.GET("", postHandler.List)
+				posts.GET("/:id", postHandler.GetByID)
+				posts.PUT("/:id", postHandler.Update)
+				posts.DELETE("/:id", postHandler.Delete)
+				posts.POST("/:id/publish", postHandler.Publish)
+			}
 		}
 	}
 
-	// Start server
 	addr := fmt.Sprintf(":%s", cfg.AppPort)
 	log.Printf("starting server on %s", addr)
 	if err := router.Run(addr); err != nil {
